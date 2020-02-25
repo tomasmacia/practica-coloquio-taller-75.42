@@ -119,11 +119,6 @@ public:
         this->nextAction.nextLane = 0;
     }
 
-    ~Movable() {
-        delete(position);
-        position = nullptr;
-    }
-
     void setNextAction(NextAction na) {
         this->nextAction = na;
     }
@@ -158,18 +153,12 @@ private:
     NextAction nextAction;
     double MOVE_STEP = STEP;
     double traveled = 0.0;
-//    std::vector<Input*> inputs;
 };
 
 class FixedObject : public Entity {
 public:
     FixedObject(std::string name, double x, int lane) : Entity(name, x, lane) {
         this->type = "o";
-    }
-
-    ~FixedObject() {
-        delete(position);
-        position = nullptr;
     }
 
     void update(CollisionManager *collisionManager) override {
@@ -197,6 +186,9 @@ public:
             delete(movable);
             movable = nullptr;
         }
+
+        delete(collisionManager);
+        collisionManager = nullptr;
     }
 
     void update() {
@@ -296,27 +288,31 @@ public:
         this->inputsPerPlayer = getInputsPerPlayer(inputs);
     }
 
-    void dispatchNextAction(Movable *movable) {
-        if (!movable->alive) {
-            movable->setNextAction(getMove());
-            return;
-        }
-        auto element = this->inputsPerPlayer.find(movable->name);
-        if (element != this->inputsPerPlayer.end()) { // has inputs
-            if (!element->second.empty()) {
-                Input* possibleNextInput = element->second.front();
-                if (areEqualsDouble(possibleNextInput->positionTriggered, movable->getTraveledDistance())) {
-                    movable->setNextAction(getSwitchLane(possibleNextInput));
-                    element->second.pop_front();
-                } else {
-                    movable->setNextAction(getMove());
-                }
-            } else {
-                movable->setNextAction(getMove());
+    ~Controller() {
+        for (auto element : this->inputsPerPlayer) {
+            for (auto input : element.second) {
+                delete(input);
+                input = nullptr;
             }
-        } else {
-            movable->setNextAction(getMove());
         }
+    }
+
+    void dispatchNextAction(Movable *movable) {
+        if (movable->alive) {
+            auto element = this->inputsPerPlayer.find(movable->name);
+            if (element != this->inputsPerPlayer.end()) { // has inputs
+                if (!element->second.empty()) {
+                    Input* possibleNextInput = element->second.front();
+                    if (areEqualsDouble(possibleNextInput->positionTriggered, movable->getTraveledDistance())) {
+                        movable->setNextAction(getSwitchLane(possibleNextInput));
+                        element->second.pop_front();
+                        return;
+                    }
+                }
+            }
+        }
+
+        movable->setNextAction(getMove());
     }
 
 private:
@@ -364,6 +360,8 @@ bool compareInputs(Input *leftInput, Input *rightInput) {
 
 int main() {
 
+    std::cout << "=== Loading movables and objects ===" << std::endl;
+
     std::ifstream file;
     file.open("jugadores_objetos.txt");
 
@@ -388,6 +386,8 @@ int main() {
 
         std::cout << "Initialized " << name << " at position " << position << " in lane " << lane << std::endl;
     }
+
+    std::cout << std::endl <<  "=== Loading inputs ===" << std::endl;
 
     std::ifstream commandsFile;
     commandsFile.open("comandos_inputs.txt");
@@ -418,6 +418,8 @@ int main() {
         }
         entityManager.update();
     }
+
+    std::cout << std::endl <<  "=== Leaderboard ===" << std::endl;
 
     entityManager.showLeaderboard();
 
