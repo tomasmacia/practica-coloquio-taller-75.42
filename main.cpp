@@ -1,10 +1,15 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <deque>
 #include <map>
 #include <cmath>
 
 #define STEP 0.05
+
+bool areEqualsDouble(double a, double b) {
+    return fabs(a - b) < STEP/2;
+}
 
 class Position {
 public:
@@ -34,7 +39,7 @@ public:
     }
 
     bool equals(Position *otherPosition) {
-        return fabs(this->getX() - otherPosition->getX()) < STEP/2 && this->getLane() == otherPosition->getLane();
+        return areEqualsDouble(this->getX(), otherPosition->getX()) && this->getLane() == otherPosition->getLane();
     }
 
 private:
@@ -62,6 +67,11 @@ public:
 enum Action {
     MOVE,
     SWITCH_LANE
+};
+
+struct NextAction {
+    Action action;
+    int nextLane;
 };
 
 class Entity;
@@ -105,6 +115,8 @@ class Movable : public Entity {
 public:
     Movable(std::string name, double x, int lane) : Entity(name, x, lane) {
         this->type = "p";
+        this->nextAction.action = MOVE;
+        this->nextAction.nextLane = 0;
     }
 
     ~Movable() {
@@ -112,10 +124,18 @@ public:
         position = nullptr;
     }
 
+    void setNextAction(NextAction na) {
+        this->nextAction = na;
+    }
+
     void move() {
         if (alive) {
-            this->position->incrementX(MOVE_STEP);
-            traveled += MOVE_STEP;
+            if (nextAction.action == MOVE) {
+                this->position->incrementX(MOVE_STEP);
+                traveled += MOVE_STEP;
+            } else if (nextAction.action == SWITCH_LANE) {
+                switchLane(nextAction.nextLane);
+            }
         }
     }
 
@@ -135,6 +155,7 @@ public:
     }
 
 private:
+    NextAction nextAction;
     double MOVE_STEP = STEP;
     double traveled = 0.0;
 //    std::vector<Input*> inputs;
@@ -267,35 +288,65 @@ void CollisionManager::checkCollisions(Entity *entity){
 class Controller {
 public:
     Controller(std::vector<Input*> inputs) {
-        this->inputs = inputs;
         this->inputsPerPlayer = getInputsPerPlayer(inputs);
     }
 
-//    Action *getNextAction(Movable *movable) {
-//        auto element = this->inputsPerPlayer.find(movable->name);
-//        if (element != this->inputsPerPlayer.end()) { // has inputs
-//            element->second.front()
-//        }
-//    }
+    void dispatchNextAction(Movable *movable) {
+        if (!movable->alive) {
+            movable->setNextAction(getMove());
+            return;
+        }
+        auto element = this->inputsPerPlayer.find(movable->name);
+        if (element != this->inputsPerPlayer.end()) { // has inputs
+            if (!element->second.empty()) {
+                Input* possibleNextInput = element->second.front();
+                if (areEqualsDouble(possibleNextInput->positionTriggered, movable->getTraveledDistance())) {
+                    movable->setNextAction(getSwitchLane(possibleNextInput));
+                    element->second.pop_front();
+                } else {
+                    movable->setNextAction(getMove());
+                }
+            } else {
+                movable->setNextAction(getMove());
+            }
+        } else {
+            movable->setNextAction(getMove());
+        }
+    }
 
 private:
-    std::vector<Input*> inputs;
-    std::map<std::string, std::vector<Input*>> inputsPerPlayer;
+    std::map<std::string, std::deque<Input*>> inputsPerPlayer;
 
-    std::map<std::string, std::vector<Input*>> getInputsPerPlayer(std::vector<Input*> inputs) {
-        std::map<std::string, std::vector<Input*>> inputsMap;
+    std::map<std::string, std::deque<Input*>> getInputsPerPlayer(std::vector<Input*> inputs) {
+        std::map<std::string, std::deque<Input*>> inputsMap;
         for (auto *input : inputs) {
             auto element = inputsMap.find(input->name); // check for inputs for this player input
-            if ( element == inputsMap.end()) { // no inputs loaded for this player -> put a vector with this input
-                std::vector<Input*> inputsForPlayer = {input};
+            if ( element == inputsMap.end()) { // no inputs loaded for this player -> put a deque with this input
+                std::deque<Input*> inputsForPlayer = {input};
                 inputsMap.emplace(std::make_pair(input->name, inputsForPlayer));
             } else {
-                element->second.push_back(input); // put input in existent vector
+                element->second.push_back(input); // put input in existent deque
                 inputsMap.emplace(std::make_pair(input->name, element->second));
             }
         }
 
         return inputsMap;
+    }
+
+    NextAction getMove() {
+        NextAction na{};
+        na.action = MOVE;
+        na.nextLane = 0;
+
+        return na;
+    }
+
+    NextAction getSwitchLane(Input *input) {
+        NextAction na{};
+        na.action = SWITCH_LANE;
+        na.nextLane = input->newLane;
+
+        return na;
     }
 
 };
@@ -354,9 +405,12 @@ int main() {
         std::cout << "At position " << input->positionTriggered << " " << input->name << " moved to lane " << input->newLane << std::endl;
     }
 
-    //Controller controller(inputs);
+    Controller controller(inputs);
 
     while (entityManager.getCurrentAliveMovables() > 0 && entityManager.getCurrentObjects() > 0) {
+        for (auto *movable : entityManager.getMovables()) {
+            controller.dispatchNextAction(movable);
+        }
         entityManager.update();
     }
 
