@@ -246,8 +246,13 @@ public:
         return movables;
     }
 
-    void showStats() {
-        for (auto *movable : movables) {
+    void showLeaderboard() {
+        std::vector<Movable*> leaderboard = movables;
+        sort(leaderboard.begin(), leaderboard.end(), [](Movable *leftMovable, Movable* rightMovable) {
+            return leftMovable->getTraveledDistance() < rightMovable->getTraveledDistance();
+        });
+
+        for (auto *movable : leaderboard) {
             if (movable->alive) {
                 std::cout << movable->name << " traveled for " << movable->getTraveledDistance() << " without crashing!" << std::endl;
             } else {
@@ -414,7 +419,7 @@ int main() {
         entityManager.update();
     }
 
-    entityManager.showStats();
+    entityManager.showLeaderboard();
 
     return 0;
 }
