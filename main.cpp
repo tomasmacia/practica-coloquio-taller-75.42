@@ -4,12 +4,17 @@
 #include <deque>
 #include <map>
 #include <cmath>
+#include <algorithm>
+#include <zconf.h>
 
-#define STEP 0.05
+
+double ONE_UNIT = 0.01;
 
 bool areEqualsDouble(double a, double b) {
-    return fabs(a - b) < STEP/2;
+    return fabs(a - b) < (ONE_UNIT*ONE_UNIT); // avoid doubleing point miscalculations
 }
+
+
 
 class Position {
 public:
@@ -18,28 +23,28 @@ public:
         this->lane = lane;
     }
 
-    void setX(double nextX) {
-        this->x = nextX;
-    }
-
     double getX() {
         return this->x;
-    }
-
-    void incrementX(double increment) {
-        this->x += increment;
-    }
-
-    void setLane(int nextLane) {
-        this->lane = nextLane;
     }
 
     int getLane() {
         return this->lane;
     }
 
-    bool equals(Position *otherPosition) {
-        return areEqualsDouble(this->getX(), otherPosition->getX()) && this->getLane() == otherPosition->getLane();
+    void setX(double newX) {
+        this->x = newX;
+    }
+
+    void setLane(int newLane) {
+        this->lane = newLane;
+    }
+
+    void incrementX(double amount) {
+        this->x += amount;
+    }
+
+    bool areInSameLane(Position *otherPosition) {
+        return this->lane == otherPosition->lane;
     }
 
 private:
@@ -49,19 +54,15 @@ private:
 
 class Input {
 public:
-    Input(double pos, std::string name, int lane) {
-        this->positionTriggered = pos;
+    Input(double time, std::string name, int lane) {
+        this->time = time;
         this->name = name;
-        this->newLane = lane;
+        this->lane = lane;
     }
 
-    ~Input() {
-
-    }
-
-    double positionTriggered;
+    double time;
     std::string name;
-    int newLane;
+    int lane;
 };
 
 enum Action {
@@ -79,7 +80,9 @@ class EntityManager;
 
 class CollisionManager {
 public:
-    CollisionManager(EntityManager *entityManager);
+    CollisionManager(EntityManager *entityManager) {
+        this->entityManager = entityManager;
+    }
 
     void checkCollisions(Entity *entity);
 
@@ -95,25 +98,25 @@ public:
     }
 
     ~Entity() {
-        delete(this->position);
+        delete(position);
         position = nullptr;
-    };
+    }
 
     void kill() {
         this->alive = false;
     }
 
-    Position *position;
+    virtual void update(CollisionManager *collisionManager) = 0;
+
+    Position *position = nullptr;
     std::string name;
     std::string type;
     bool alive = true;
-
-    virtual void update(CollisionManager*) = 0;
 };
 
-class Movable : public Entity {
+class Player : public Entity {
 public:
-    Movable(std::string name, double x, int lane) : Entity(name, x, lane) {
+    Player(std::string name, double x, int lane) : Entity(name, x, lane) {
         this->type = "p";
         this->nextAction.action = MOVE;
         this->nextAction.nextLane = 0;
@@ -126,15 +129,18 @@ public:
     void move() {
         if (alive) {
             if (nextAction.action == MOVE) {
-                this->position->incrementX(MOVE_STEP);
-                traveled += MOVE_STEP;
+                this->position->incrementX(STEP);
+                traveled += STEP;
             } else if (nextAction.action == SWITCH_LANE) {
+                this->position->incrementX(STEP);
+                traveled += STEP;
                 switchLane(nextAction.nextLane);
             }
         }
     }
 
     void switchLane(int nextLane) {
+        std::cout << "Cambio de carril " << this->name << " a " << nextLane << std::endl;
         this->position->setLane(nextLane);
     }
 
@@ -145,14 +151,14 @@ public:
         }
     }
 
-    double getTraveledDistance() {
+    double getDistanceTraveled() {
         return traveled;
     }
 
 private:
     NextAction nextAction;
-    double MOVE_STEP = STEP;
-    double traveled = 0.0;
+    double STEP = ONE_UNIT;
+    double traveled;
 };
 
 class FixedObject : public Entity {
@@ -166,8 +172,21 @@ public:
             collisionManager->checkCollisions(this);
         }
     }
-};
 
+    bool collidesWithEntity(Entity *entity) {
+        bool collides = false;
+
+        if (this->position->areInSameLane(entity->position)) { // if they are in the same lane, check for collisions
+            // TODO: divide unit time to avoid doubleing point miscalculations
+            collides = entity->position->getX() >= this->position->getX() && entity->position->getX() <= (this->position->getX() + DEPTH);
+        }
+
+        return collides;
+    }
+
+private:
+    double DEPTH = 1;
+};
 
 
 class EntityManager {
@@ -177,109 +196,118 @@ public:
     }
 
     ~EntityManager() {
-        for (auto *object : objects) {
-            delete(object);
-            object = nullptr;
-        }
-
-        for (auto *movable : movables) {
-            delete(movable);
-            movable = nullptr;
-        }
-
         delete(collisionManager);
         collisionManager = nullptr;
     }
 
+    void addPlayer(Player *player) {
+        players.push_back(player);
+    }
+
+    void addObject(FixedObject *object) {
+        objects.push_back(object);
+    }
+
     void update() {
-        for (auto *movable : movables) {
-            movable->update(collisionManager);
+        for (auto *player : players) {
+            player->update(collisionManager);
         }
-        for (auto *object : objects) {
-            object->update(collisionManager);
+
+        for (auto *fixedObject : objects) {
+            fixedObject->update(collisionManager);
         }
     }
 
-    void addObject(FixedObject* fo) {
-        objects.push_back(fo);
-    }
-
-    void addMovable(Movable* movable) {
-        movables.push_back(movable);
-    }
-
-    int getCurrentAliveMovables() {
-        int alives = 0;
-        for (auto *movable : movables) {
-            if (movable->alive) {
-                alives +=1;
-            }
-        }
-
-        return alives;
-    }
-
-    int getCurrentObjects() {
-        int alives = 0;
-        for (auto *object : objects) {
-            if (object->alive) {
-                alives +=1;
-            }
-        }
-
-        return alives;
+    std::vector<Player*> getPlayers() {
+        return players;
     }
 
     std::vector<FixedObject*> getObjects() {
         return objects;
+    };
+
+    bool objectsAheadOfPlayers() {
+        FixedObject* rightmostObject = nullptr;
+
+        for (auto *object : objects) {
+            if (rightmostObject == nullptr && object->alive) {
+                rightmostObject = object;
+                break;
+            }
+            if (object->alive && object->position->getX() > rightmostObject->position->getX()) {
+                rightmostObject = object;
+            }
+        }
+
+        Player* leftmostPlayer = nullptr;
+
+        for (auto *player : players) {
+            if (leftmostPlayer == nullptr && player->alive) {
+                leftmostPlayer = player;
+                break;
+            }
+            if (player->alive && player->position->getX() < leftmostPlayer->position->getX()) {
+                leftmostPlayer = player;
+            }
+        }
+
+        bool cmp = false;
+
+        if (leftmostPlayer != nullptr && rightmostObject != nullptr) {
+            cmp = leftmostPlayer->position->getX() < rightmostObject->position->getX();
+        }
+
+        return cmp;
     }
 
-    std::vector<Movable*> getMovables() {
-        return movables;
+    int getAlivePlayers() {
+        int alive = 0;
+        for (auto *player : players) {
+            if (player->alive) {
+                alive += 1;
+            }
+        }
+
+        return alive;
     }
 
-    void showLeaderboard() {
-        std::vector<Movable*> leaderboard = movables;
-        sort(leaderboard.begin(), leaderboard.end(), [](Movable *leftMovable, Movable* rightMovable) {
-            return leftMovable->getTraveledDistance() < rightMovable->getTraveledDistance();
+    void printDistanceTraveled() {
+        std::vector<Player*> playersCpy = players;
+
+        sort(playersCpy.begin(), playersCpy.end(), [](Player* leftPlayer, Player *rightPlayer) {
+            return leftPlayer->getDistanceTraveled() < rightPlayer->getDistanceTraveled();
         });
 
-        for (auto *movable : leaderboard) {
-            if (movable->alive) {
-                std::cout << movable->name << " traveled for " << movable->getTraveledDistance() << " without crashing!" << std::endl;
-            } else {
-                std::cout << movable->name << " crashed after traveling for " << movable->getTraveledDistance() << std::endl;
+        std::cout << std::endl << "**** DISTANCE TRAVELED ****" << std::endl;
+
+        for (auto *player : playersCpy) {
+            if (!player->alive) {
+                std::cout << "Player " << player->name << " crashed after traveling for " << player->getDistanceTraveled() << std::endl;
             }
         }
     }
 
 private:
+    std::vector<Player*> players;
     std::vector<FixedObject*> objects;
-    std::vector<Movable*> movables;
-    CollisionManager *collisionManager;
+
+    CollisionManager *collisionManager = nullptr;
 };
 
-CollisionManager::CollisionManager(EntityManager *entityManager) {
-    this->entityManager = entityManager;
-}
-
-void CollisionManager::checkCollisions(Entity *entity){
-    if (entity->type == "p") { // collides with objects
-        for (auto *object: entityManager->getObjects()) {
-            if (object->alive && object->position->equals(entity->position)) {
-                object->kill();
-                entity->kill();
+void CollisionManager::checkCollisions(Entity *entity) {
+    if (entity->alive) {
+        if (entity->type == "p") {
+            for (auto *object : this->entityManager->getObjects()) {
+                if (object->collidesWithEntity(entity)) {
+                    std::cout << "Player " << entity->name << " crashed into " << object->name << " at " << entity->position->getX() << std::endl;
+                    entity->kill();
+                 }
             }
-        }
-    } else if (entity->type == "o") { // collides with movables
-        for (auto *movable: entityManager->getMovables()) {
-            if (movable->alive && movable->position->equals(entity->position)) {
-                movable->kill();
-                entity->kill();
-            }
+        } else if (entity->type == "o") {
+            // do nothing
+            // we could check for collisions, but this should not happen since players update first...
         }
     }
-
 }
 
 class Controller {
@@ -288,140 +316,148 @@ public:
         this->inputsPerPlayer = getInputsPerPlayer(inputs);
     }
 
-    ~Controller() {
-        for (auto element : this->inputsPerPlayer) {
-            for (auto input : element.second) {
-                delete(input);
-                input = nullptr;
-            }
-        }
-    }
+    void processInput(Player *player, double currentTime) {
+        if (player->alive) {
+            auto element = this->inputsPerPlayer.find(player->name);
 
-    void dispatchNextAction(Movable *movable) {
-        if (movable->alive) {
-            auto element = this->inputsPerPlayer.find(movable->name);
-            if (element != this->inputsPerPlayer.end()) { // has inputs
+            if (element != this->inputsPerPlayer.end()) { // we have a deque with inputs (or not if empty)
                 if (!element->second.empty()) {
-                    Input* possibleNextInput = element->second.front();
-                    if (areEqualsDouble(possibleNextInput->positionTriggered, movable->getTraveledDistance())) {
-                        movable->setNextAction(getSwitchLane(possibleNextInput));
+                    Input *input = element->second.front();
+                    if (input != nullptr && areEqualsDouble(input->time, currentTime)) {
+                        //std::cout << "Enviando input al jugador " << input->name << " al carril " << input->lane << ". Tiempo input: " << input->time << " | Tiempo loop: " << currentTime << std::endl;
                         element->second.pop_front();
+                        player->setNextAction(getSwitchLaneAction(input));
                         return;
                     }
                 }
             }
         }
 
-        movable->setNextAction(getMove());
+        player->setNextAction(getMoveAction());
     }
+
+    int getInputsLeft() {
+        int inputsLeft = 0;
+        for (auto element : this->inputsPerPlayer) {
+            inputsLeft += element.second.size();
+        }
+
+        return inputsLeft;
+    }
+
 
 private:
     std::map<std::string, std::deque<Input*>> inputsPerPlayer;
 
     std::map<std::string, std::deque<Input*>> getInputsPerPlayer(std::vector<Input*> inputs) {
         std::map<std::string, std::deque<Input*>> inputsMap;
+
         for (auto *input : inputs) {
-            auto element = inputsMap.find(input->name); // check for inputs for this player input
-            if ( element == inputsMap.end()) { // no inputs loaded for this player -> put a deque with this input
-                std::deque<Input*> inputsForPlayer = {input};
-                inputsMap.emplace(std::make_pair(input->name, inputsForPlayer));
-            } else {
-                element->second.push_back(input); // put input in existent deque
+            auto element = inputsMap.find(input->name);
+
+            if (element == inputsMap.end()) { // no inputs present for this player name :: we create a new deque and put that in the map
+                std::deque<Input*> dequeForPlayer = {input};
+                inputsMap.emplace(std::make_pair(input->name, dequeForPlayer));
+            } else { // there are inputs preset :: we add the new input to the existing deque and put it back in the map (just in case)
+                element->second.push_back(input);
                 inputsMap.emplace(std::make_pair(input->name, element->second));
             }
         }
 
+
         return inputsMap;
     }
 
-    NextAction getMove() {
+    NextAction getMoveAction() {
         NextAction na{};
         na.action = MOVE;
-        na.nextLane = 0;
+        na.nextLane = 0; // we dont use this value when moving
 
         return na;
     }
 
-    NextAction getSwitchLane(Input *input) {
+    NextAction getSwitchLaneAction(Input *input) {
         NextAction na{};
         na.action = SWITCH_LANE;
-        na.nextLane = input->newLane;
+        na.nextLane = input->lane;
 
         return na;
     }
-
 };
 
-
-bool compareInputs(Input *leftInput, Input *rightInput) {
-    return leftInput->positionTriggered < rightInput->positionTriggered;
-}
-
-
 int main() {
+    std::cout << "**** INITIALIZING PLAYERS AND OBJECTS ****" << std::endl;
 
-    std::cout << "=== Loading movables and objects ===" << std::endl;
-
-    std::ifstream file;
-    file.open("jugadores_objetos.txt");
+    std::ifstream players("players.txt");
 
     EntityManager entityManager;
 
-    while (!file.eof()) {
+    while(!players.eof()) {
         std::string name, position, type, lane;
-        getline(file, name, ',');
+        getline(players, name, ',');
         if (name.empty()) break;
-        getline(file, position, ',');
-        getline(file, type, ',');
-        getline(file, lane, '\n');
+        getline(players, position, ',');
+        getline(players, type, ',');
+        getline(players, lane);
 
         if (type == "p") {
-            entityManager.addMovable(new Movable(name, stod(position), stoi(lane)));
+            entityManager.addPlayer(new Player(name, stod(position), stoi(lane)));
+            std::cout << "Initialized player " << name << " in position " << position << " and lane " << lane << std::endl;
         } else if (type == "o") {
             entityManager.addObject(new FixedObject(name, stod(position), stoi(lane)));
-        } else {
-            std::cerr << "Type " << type << " not supported." << std::endl;
-            std::cerr << "Error initializing " << name << " at position " << position << " in lane " << lane << std::endl;
+            std::cout << "Initialized object " << name << " in position " << position << " and lane " << lane << std::endl;
         }
-
-        std::cout << "Initialized " << name << " at position " << position << " in lane " << lane << std::endl;
     }
 
-    std::cout << std::endl <<  "=== Loading inputs ===" << std::endl;
+    players.close();
 
-    std::ifstream commandsFile;
-    commandsFile.open("comandos_inputs.txt");
+    std::cout << std::endl << "Initialized " << entityManager.getAlivePlayers() << " players and " << entityManager.getObjects().size() << " objects" << std::endl;
+
+
+    std::cout << std::endl << "**** INITIALIZING INPUTS ****" << std::endl;
+
+    std::ifstream inputsFile("inputs.txt");
 
     std::vector<Input*> inputs;
 
-    while (!commandsFile.eof()) {
-        std::string position, name, newLane;
-        getline(commandsFile, position, ',');
-        if (position.empty()) break;
-        getline(commandsFile, name, ',');
-        getline(commandsFile, newLane, '\n');
+    while(!inputsFile.eof()) {
+        std::string time, name, lane;
+        getline(inputsFile, time, ',');
+        if (time.empty()) break;
+        getline(inputsFile, name, ',');
+        getline(inputsFile, lane);
 
-        inputs.push_back(new Input(stod(position), name, stoi(newLane)));
+        inputs.push_back(new Input(stod(time), name, stoi(lane)));
     }
 
-    sort(inputs.begin(), inputs.end(), &compareInputs);
+    inputsFile.close();
+
+    sort(inputs.begin(), inputs.end(), [](Input *leftInput, Input* rightInput) {
+        return leftInput->time < rightInput->time;
+    });
 
     for (auto *input : inputs) {
-        std::cout << "At position " << input->positionTriggered << " " << input->name << " moved to lane " << input->newLane << std::endl;
+        std::cout << "Player " << input->name << " moved to lane " << input->lane << " at " << input->time << std::endl;
     }
+
+    std::cout << std::endl << std::endl << std::endl << "Beginning of the game" << std::endl;
+
 
     Controller controller(inputs);
 
-    while (entityManager.getCurrentAliveMovables() > 0 && entityManager.getCurrentObjects() > 0) {
-        for (auto *movable : entityManager.getMovables()) {
-            controller.dispatchNextAction(movable);
+    double frames = 0;
+
+    while(entityManager.getAlivePlayers() > 0 && entityManager.objectsAheadOfPlayers()) {
+        frames += ONE_UNIT;
+        for (auto *player : entityManager.getPlayers()) {
+            controller.processInput(player, frames);
         }
+
         entityManager.update();
     }
 
-    std::cout << std::endl <<  "=== Leaderboard ===" << std::endl;
+    entityManager.printDistanceTraveled();
 
-    entityManager.showLeaderboard();
 
     return 0;
 }

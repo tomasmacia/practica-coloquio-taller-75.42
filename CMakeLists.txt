@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.15)
-project(untitled1)
+cmake_minimum_required(VERSION 3.14)
+project(tp_taller_99248)
 
 set(CMAKE_CXX_STANDARD 14)
 
-add_executable(untitled1 main.cpp)
+add_executable(tp_taller_99248 main.cpp)
